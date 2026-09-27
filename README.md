@@ -13,22 +13,58 @@ contract.
 
 ![dashboard](docs/img/dashboard.png)
 
+## What you'll see
+
+Open the dashboard and 24 help-desk messages arrive one by one (a lost badge, a projector failing
+before a talk, a nut allergy, a chained fire exit, a thank-you note...). For each message:
+
+1. **Left: System One decides.** Probability bars fill in for *urgent*, *needs a person*, *safety
+   risk*, *mood* and *team*, with the time it took (a few hundred ms) and "0 tokens generated". A
+   badge shows the route: **⚠ Human now**, **◷ Human queue** or **✓ Auto-reply**.
+2. **Right: System Two replies**, token by token, but only for messages routed to auto-reply.
+   Emergencies and angry messages are never answered by the model; they go to people.
+3. **Top:** System One latency (last and median), and how many messages went to people vs. were
+   auto-answered.
+
+`bench` mode prints the same triage done two ways on the same model (scoring vs. asking the model for
+JSON), with latency, JSON validity and agreement.
+
 ## Run it
 
-1. `jitllm serve` with the `/v1/systemone` endpoint (beehive-lab/jitllm#190), on the GPU:
+You need an NVIDIA GPU with CUDA, JDK 21, Maven, git, and Python 3 (used by TornadoVM's build).
 
-   ```bash
-   ./jitllm serve --gpu --model Llama-3.2-3B-Instruct-Q8_0.gguf --ctx-size 4096 \
-       --with-prefill-decode --batch-prefill-size 128 --port 8080
-   ```
+**1. Build jitLLM with the `/v1/systemone` endpoint** (beehive-lab/jitllm#190). jitLLM's helper script
+builds the TornadoVM SDK it needs; the first run takes a while.
 
-2. The demo (Java 21):
+```bash
+git clone -b feat/systemone-decisions https://github.com/beehive-lab/jitllm.git && cd jitllm
+scripts/tornadovm-dev.sh setup --backend cuda --jdk 21
+scripts/tornadovm-dev.sh build clean package -DskipTests
+```
 
-   ```bash
-   mvn -q package
-   java -jar target/jev-demo.jar dashboard --jitllm http://127.0.0.1:8080   # open http://127.0.0.1:9090
-   java -jar target/jev-demo.jar bench     --jitllm http://127.0.0.1:8080   # scoring vs. generating JSON
-   ```
+**2. Download a model and start the server** (in the `jitllm` directory, keep it running):
+
+```bash
+curl -L -o Llama-3.2-3B-Instruct-Q8_0.gguf \
+  https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q8_0.gguf
+eval "$(scripts/tornadovm-dev.sh env)"
+./jitllm serve --gpu --model Llama-3.2-3B-Instruct-Q8_0.gguf --ctx-size 4096 \
+    --with-prefill-decode --batch-prefill-size 128 --port 8080
+```
+
+Ready when it prints `listening on http://127.0.0.1:8080`. For a faster, smaller model use
+`Llama-3.2-1B-Instruct-f16.gguf` from `bartowski/Llama-3.2-1B-Instruct-GGUF` (routing is less reliable).
+
+**3. Run the demo** (in this repository, another terminal):
+
+```bash
+mvn -q package
+java -jar target/jev-demo.jar dashboard       # then open http://127.0.0.1:9090
+java -jar target/jev-demo.jar bench           # scoring vs. generating JSON, prints a table
+```
+
+Options: `--jitllm URL` (default `http://127.0.0.1:8080`), `--port N` for the dashboard (default
+9090), `--pause MS` between messages (default 1200).
 
 The whole System One side is this (`Triage.java`):
 
