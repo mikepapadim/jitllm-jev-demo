@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System One on the GPU</title>
+<style>
+  :root {
+    --bg: #111110; --panel: #1a1a19; --panel-2: #22221f; --line: #2e2e2a;
+    --ink: #f4f3ee; --ink-2: #c3c2b7; --muted: #8b8a82;
+    --s1: #3987e5; --s2: #d95926; --accent: #199e70;
+    --good: #2fa36b; --warn: #c98500; --crit: #e66767;
+    --team-venue: #3987e5; --team-registration: #d95926; --team-catering: #199e70;
+    --team-speakers: #c98500; --team-safety: #e66767; --team-info: #9085e9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { padding: 20px 24px 28px; max-width: 1500px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+  h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; }
+  h1 .s1 { color: var(--s1); } h1 .s2 { color: var(--s2); }
+  .sub { color: var(--ink-2); margin-top: 4px; font-size: 14px; }
+  .kpis { display: flex; gap: 12px; flex-wrap: wrap; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 128px; }
+  .kpi .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .col-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; animation: in .25s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  .msg { font-size: 15.5px; margin-bottom: 10px; }
+  .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .badge { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; }
+  .route-human-now { color: var(--crit); } .route-human-queue { color: var(--warn); } .route-auto-reply { color: var(--good); }
+  .ms { font-variant-numeric: tabular-nums; color: var(--s1); font-weight: 650; font-size: 13px; }
+  .pending { color: var(--muted); font-size: 13px; }
+  .qs { display: grid; grid-template-columns: 118px 1fr 52px; gap: 6px 10px; align-items: center; font-size: 13px; }
+  .qs .n { color: var(--ink-2); }
+  .qs .p { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .bar { height: 10px; background: var(--panel-2); border-radius: 5px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; border-radius: 0 4px 4px 0; background: var(--s1); transition: width .45s ease-out; }
+  .stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--panel-2); }
+  .stack > i { height: 100%; transition: flex-grow .45s ease-out; flex-grow: 0; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .replies { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 150px); overflow: auto; }
+  .reply { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--s2); border-radius: 10px; padding: 12px 14px; }
+  .reply .q { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .reply .a { white-space: pre-wrap; }
+  .reply .t { color: var(--muted); font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .cursor::after { content: "▍"; color: var(--s2); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 18px; }
+  @media (prefers-reduced-motion: reduce) {
+    .card { animation: none; } .bar > i, .stack > i { transition: none; } .cursor::after { animation: none; }
+  }
+  code { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span class="s1">System One</span> + <span class="s2">System Two</span>, one GPU, pure Java</h1>
+      <div class="sub">Conference help desk · jitLLM on TornadoVM · decisions through the unmodified Jev Java SDK · replies from the same model</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="k-last">–</div><div class="l">System One, last</div></div>
+      <div class="kpi"><div class="v" id="k-med">–</div><div class="l">System One, median</div></div>
+      <div class="kpi"><div class="v" id="k-n">0</div><div class="l">messages triaged</div></div>
+      <div class="kpi"><div class="v" id="k-people">0 / 0</div><div class="l">to people / auto-reply</div></div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section>
+      <div class="col-title"><span class="dot" style="background:var(--s1)"></span>System One — typed decisions, no text generated</div>
+      <div class="feed" id="feed"></div>
+    </section>
+    <section>
+      <div class="col-title"><span class="dot" style="background:var(--s2)"></span>System Two — replies, only where System One said so</div>
+      <div class="replies" id="replies"></div>
+    </section>
+  </div>
+
+  <footer>Routing policy: safety risk &gt; 0.7, or urgent &gt; 0.85 and needs a person &gt; 0.8 → <b>human now</b>; needs a person &gt; 0.75 or angry → <b>human queue</b>; everything else → <b>auto-reply</b> drafted by the model. The probabilities are a prompted model's relative preferences over the options, not calibrated confidences; the thresholds are policy, set once for this model.</footer>
+</div>
+
+<script>
+const TEAMS = ["venue", "registration", "catering", "speakers", "safety", "info"];
+const ROUTES = {
+  "human-now":   { icon: "⚠", label: "Human now" },
+  "human-queue": { icon: "◷", label: "Human queue" },
+  "auto-reply":  { icon: "✓", label: "Auto-reply" },
+};
+const times = []; let people = 0, auto = 0;
+const feed = document.getElementById("feed");
+const replies = document.getElementById("replies");
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pct = x => (100 * x).toFixed(0) + "%";
+
+function card(id, text) {
+  const el = document.createElement("div");
+  el.className = "card"; el.id = "m" + id;
+  el.innerHTML = `<div class="msg">${esc(text)}</div>
+    <div class="meta"><span class="pending">System One deciding…</span></div>
+    <div class="qs">
+      <span class="n">urgent</span><div class="bar"><i data-q="urgent"></i></div><span class="p" data-p="urgent"></span>
+      <span class="n">needs a person</span><div class="bar"><i data-q="needs_human"></i></div><span class="p" data-p="needs_human"></span>
+      <span class="n">safety risk</span><div class="bar"><i data-q="safety_risk" style="background:var(--crit)"></i></div><span class="p" data-p="safety_risk"></span>
+      <span class="n">mood</span><div class="bar"><i data-q="mood" style="background:var(--s2)"></i></div><span class="p" data-p="mood"></span>
+      <span class="n">team</span><div class="stack">${TEAMS.map(t => `<i data-t="${t}" style="background:var(--team-${t})"></i>`).join("")}</div><span class="p" data-p="team"></span>
+    </div>
+    <div class="legend">${TEAMS.map(t => `<span><span class="dot" style="background:var(--team-${t})"></span>${t}</span>`).join("")}</div>`;
+  feed.prepend(el);
+  while (feed.children.length > 30) feed.lastChild.remove();
+}
+
+function decision(d) {
+  const el = document.getElementById("m" + d.id); if (!el) return;
+  const r = ROUTES[d.route];
+  el.querySelector(".meta").innerHTML =
+    `<span class="badge route-${d.route}">${r.icon} ${r.label}</span>
+     <span class="ms">${d.millis.toFixed(0)} ms</span>
+     <span class="pending">${d.inputTokens} tokens read · 0 generated</span>`;
+  const yesNo = { urgent: d.urgent, needs_human: d.needsHuman, safety_risk: d.safetyRisk };
+  for (const [q, v] of Object.entries(yesNo)) {
+    el.querySelector(`[data-q="${q}"]`).style.width = pct(v);
+    el.querySelector(`[data-p="${q}"]`).textContent = pct(v);
+  }
+  el.querySelector('[data-q="mood"]').style.width = pct(d.mood / 3);
+  el.querySelector('[data-p="mood"]').textContent = ["Happy", "Neutral", "Annoyed", "Angry"][Math.round(d.mood)];
+  for (const t of TEAMS) el.querySelector(`[data-t="${t}"]`).style.flexGrow = (d.teamProbabilities[t] || 0);
+  el.querySelector('[data-p="team"]').textContent = d.team;
+
+  times.push(d.millis);
+  const s = [...times].sort((a, b) => a - b);
+  document.getElementById("k-last").textContent = d.millis.toFixed(0) + " ms";
+  document.getElementById("k-med").textContent = s[Math.floor(s.length / 2)].toFixed(0) + " ms";
+  document.getElementById("k-n").textContent = times.length;
+  if (d.route === "auto-reply") auto++; else people++;
+  document.getElementById("k-people").textContent = people + " / " + auto;
+
+  if (d.route === "auto-reply") {
+    const rep = document.createElement("div");
+    rep.className = "reply"; rep.id = "r" + d.id;
+    const msg = el.querySelector(".msg").textContent;
+    rep.innerHTML = `<div class="q">${esc(msg.length > 110 ? msg.slice(0, 109) + "…" : msg)}</div><div class="a cursor"></div><div class="t"></div>`;
+    replies.prepend(rep);
+  }
+}
+
+const es = new EventSource("/events");
+es.addEventListener("message", e => { const m = JSON.parse(e.data); card(m.id, m.text); });
+es.addEventListener("decision", e => decision(JSON.parse(e.data)));
+es.addEventListener("reply", e => {
+  const r = JSON.parse(e.data); const a = document.querySelector(`#r${r.id} .a`);
+  if (a) a.textContent += r.delta;
+});
+es.addEventListener("reply-done", e => {
+  const r = JSON.parse(e.data); const rep = document.getElementById("r" + r.id); if (!rep) return;
+  rep.querySelector(".a").classList.remove("cursor");
+  rep.querySelector(".t").textContent = `System Two · ${(r.millis / 1000).toFixed(1)} s to write`;
+});
+es.addEventListener("done", () => es.close());
+</script>
+</body>
+</html>
